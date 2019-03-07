@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "ConvertOBJToBedrockModel": {
+      "commandName": "Project",
+      "commandLineArgs": "\".\\SteamSpider.obj\""
+    }
+  }
+}
