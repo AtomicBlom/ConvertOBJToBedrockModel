@@ -28,7 +28,7 @@ namespace ConvertOBJToBedrockModel
 		[Option("fliptexture", Required=false, HelpText="Flips the model's texture V Coordinates useful if the obj was targeting OpenGL")]
 		public bool FlipTexture { get; set; }
 
-		[Option("scale", Required=false, Default=1, HelpText="Sets the scale of the model (default 1)")]
+		[Option("scale", Required=false, Default=1, HelpText="Sets the scale of the model")]
 		public float Scale { get; set;} = 1;
 
 		[Option("translatey", Required=false, Default=0, HelpText="Translates the model along the Y axis")]
