@@ -261,6 +261,7 @@ namespace ConvertOBJToBedrockModel
 						});
 						break;
 					case "g":
+					case "o": //For the sake of bedrock, treat groups and objects as the same thing.
 						currentGroup = new Group(line[1]);
 						groups.Add(currentGroup);
 
