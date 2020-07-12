@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -172,6 +172,10 @@ namespace ConvertOBJToBedrockModel
 							new JValue(localNormalIndex),
 							new JValue(localUvIndex)
 						});
+					}
+
+					if (jsPoly.Count == 3) {
+						jsPoly.Add(jsPoly[1]);
 					}
 				}
 
