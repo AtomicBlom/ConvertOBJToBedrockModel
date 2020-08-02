@@ -2,7 +2,7 @@
   "profiles": {
     "ConvertOBJToBedrockModel": {
       "commandName": "Project",
-      "commandLineArgs": "\".\\SteamSpider.obj\""
+      "commandLineArgs": "-i \".\\i_wrote_this_by_hand.obj\""
     }
   }
 }

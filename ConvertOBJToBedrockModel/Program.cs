@@ -64,7 +64,7 @@ namespace ConvertOBJToBedrockModel
 					{
 						if (o.SwizzleYZ)
 						{
-							(polygon.Elements[1], polygon.Elements[2]) = (polygon.Elements[2], polygon.Elements[1]);
+							(polygon.Vertices[1], polygon.Vertices[2]) = (polygon.Vertices[2], polygon.Vertices[1]);
 						}
 					}
 
@@ -103,7 +103,7 @@ namespace ConvertOBJToBedrockModel
 			return 0;
 		}
 
-		private static JObject CreateEntityModel(string name, IEnumerable<Group> groups, IReadOnlyList<Vertex> vertices, IReadOnlyList<VertexNormal> normals, IReadOnlyList<TextureUv> uvs)
+		private static JObject CreateEntityModel(string name, IEnumerable<Group> groups, IReadOnlyList<Vertex> vertices, IReadOnlyList<VertexNormal> originalNormals, IReadOnlyList<TextureUv> uvs)
 		{
 			var bones = new JArray
 			{
@@ -112,6 +112,8 @@ namespace ConvertOBJToBedrockModel
 					{ "name", "root" }
 				}
 			};
+
+            var normals = new List<VertexNormal>(originalNormals);
 
 			foreach (var g in groups)
 			{
@@ -129,44 +131,26 @@ namespace ConvertOBJToBedrockModel
 					var jsPoly = new JArray();
 					jsPolys.Add(jsPoly);
 
-					foreach (var elementData in polygonData.Elements)
+					foreach (var vertex in polygonData.Vertices)
 					{
-						var vertexIndex = elementData.VertexIndex - 1;
-						var normalIndex = elementData.NormalIndex - 1;
-						var uvIndex = elementData.TextureUvIndex - 1;
-
-						if (!positionMap.TryGetValue(vertexIndex, out var localVertexIndex))
+						var positionIndex = vertex.PositionIndex - 1;
+						if (!positionMap.TryGetValue(positionIndex, out var localPositionIndex))
 						{
-							var matchingVertices = positionMap.Where(p => vertices[p.Key].Equals(vertices[vertexIndex])).ToArray();
+							var matchingVertices = positionMap.Where(p => vertices[p.Key].Equals(vertices[positionIndex])).ToArray();
 							if (matchingVertices.Any()) {
-								localVertexIndex = matchingVertices.Single().Value;
+								localPositionIndex = matchingVertices.Single().Value;
 							} else {
-								positionMap.Add(vertexIndex, localVertexIndex = jsPositions.Count);
+								positionMap.Add(positionIndex, localPositionIndex = jsPositions.Count);
 								jsPositions.Add(new JArray
 								{
-									new JValue(vertices[vertexIndex].X),
-									new JValue(vertices[vertexIndex].Y),
-									new JValue(vertices[vertexIndex].Z)
+									new JValue(vertices[positionIndex].X),
+									new JValue(vertices[positionIndex].Y),
+									new JValue(vertices[positionIndex].Z)
 								});
 							}
 						}
 
-						if (!normalMap.TryGetValue(normalIndex, out var localNormalIndex))
-						{
-							var matchingNormals = normalMap.Where(n => normals[n.Key].Equals(normals[normalIndex])).ToArray();
-							if (matchingNormals.Any()) {
-								localNormalIndex = matchingNormals.Single().Value;
-							} else {
-								normalMap.Add(normalIndex, localNormalIndex = jsNormals.Count);
-								jsNormals.Add(new JArray
-								{
-									new JValue(normals[normalIndex].X),
-									new JValue(normals[normalIndex].Y),
-									new JValue(normals[normalIndex].Z)
-								});
-							}
-						}
-
+                        var uvIndex = vertex.TextureUvIndex - 1;
 						if (!uvMap.TryGetValue(uvIndex, out var localUvIndex))
 						{
 							var matchingUVs = uvMap.Where(uv => uvs[uv.Key].Equals(uvs[uvIndex])).ToArray();
@@ -182,9 +166,61 @@ namespace ConvertOBJToBedrockModel
 							}
 						}
 
-						jsPoly.Add(new JArray
+
+                        int localNormalIndex;
+                        if (vertex.NormalIndex == null)
+                        {
+							//Calculate Normal
+                            var vertexNormal = polygonData.GetNormal(vertices);
+                            var matchingNormals = normalMap
+                                .Where(n => normals[n.Key].Equals(vertexNormal))
+                                .ToArray();
+                            if (matchingNormals.Any())
+                            {
+                                localNormalIndex = matchingNormals.Single().Value;
+                            }
+                            else
+                            {
+								
+								//add the normals to a negative index.
+                                normalMap.Add(normals.Count, localNormalIndex = jsNormals.Count);
+                                normals.Add(vertexNormal);
+								jsNormals.Add(new JArray
+                                {
+                                    new JValue(vertexNormal.X),
+                                    new JValue(vertexNormal.Y),
+                                    new JValue(vertexNormal.Z)
+                                });
+                            }
+						}
+                        else
+                        {
+                            var normalIndex = vertex.NormalIndex.Value - 1;
+							if (!normalMap.TryGetValue(normalIndex, out localNormalIndex))
+                            {
+                                var matchingNormals = normalMap
+                                    .Where(n => normals[n.Key].Equals(normals[normalIndex]))
+                                    .ToArray();
+                                if (matchingNormals.Any())
+                                {
+                                    localNormalIndex = matchingNormals.Single().Value;
+                                }
+                                else
+                                {
+                                    normalMap.Add(normalIndex, localNormalIndex = jsNormals.Count);
+                                    jsNormals.Add(new JArray
+                                    {
+                                        new JValue(normals[normalIndex].X),
+                                        new JValue(normals[normalIndex].Y),
+                                        new JValue(normals[normalIndex].Z)
+                                    });
+                                }
+                            }
+                        }
+
+                        jsPoly.Add(new JArray
 						{
-							new JValue(localVertexIndex),
+							new JValue(localPositionIndex),
 							new JValue(localNormalIndex),
 							new JValue(localUvIndex)
 						});
@@ -289,20 +325,27 @@ namespace ConvertOBJToBedrockModel
 
 						break;
 					case "f":
-						Debug.Assert(line.Length < 5);
+						Debug.Assert(line.Length >= 4 && line.Length <= 5);
 						var polygon = new Polygon();
 						for (var i = 1; i < line.Length; ++i)
 						{
 							var elements = line[i].Split("/");
 							var vertexIndex = int.Parse(elements[0]);
 							var textureUvIndex = int.Parse(elements[1]);
-							var normalIndex = int.Parse(elements[2]);
-							polygon.AddElement(new Element(vertexIndex, normalIndex, textureUvIndex));
-						}
+                            if (elements.Length > 2)
+                            {
+                                var normalIndex = int.Parse(elements[2]);
+                                polygon.AddElement(new Element(vertexIndex, textureUvIndex, normalIndex));
+                            }
+                            else
+                            {
+                                polygon.AddElement(new Element(vertexIndex, textureUvIndex));
+							}
+                        }
 
-						if (currentGroup.TryGetPreviousPolygon(out var lastPolygon) && lastPolygon.Elements.Count() == 3) {
-							var uniqueElements = lastPolygon.Elements.Except(polygon.Elements, elementComparer).ToArray();
-							var missingElements = polygon.Elements.Except(lastPolygon.Elements, elementComparer).ToArray();
+						if (currentGroup.TryGetPreviousPolygon(out var lastPolygon) && lastPolygon.Vertices.Count == 3) {
+							var uniqueElements = lastPolygon.Vertices.Except(polygon.Vertices, elementComparer).ToArray();
+							var missingElements = polygon.Vertices.Except(lastPolygon.Vertices, elementComparer).ToArray();
 							if (uniqueElements.Length == 1 && missingElements.Length == 1) {
 								lastPolygon.RepairToQuad(missingElements.Single());
 							} else {
@@ -382,10 +425,10 @@ namespace ConvertOBJToBedrockModel
 
             public bool Equals([AllowNull] Element x, [AllowNull] Element y)
             {
-                if (!(x.VertexIndex == y.VertexIndex || Equals(_vertices[x.VertexIndex - 1], _vertices[y.VertexIndex - 1]))) {
+                if (!(x.PositionIndex == y.PositionIndex || Equals(_vertices[x.PositionIndex - 1], _vertices[y.PositionIndex - 1]))) {
 					return false;
 				}
-				if (!(x.NormalIndex == y.NormalIndex || Equals(_normals[x.NormalIndex - 1], _normals[y.NormalIndex - 1]))) {
+				if (!(x.NormalIndex == y.NormalIndex || Equals(_normals[x.NormalIndex.Value - 1], _normals[y.NormalIndex.Value - 1]))) {
 					return false;
 				}
 				if (!(x.TextureUvIndex == y.TextureUvIndex || Equals(_uvs[x.TextureUvIndex - 1], _uvs[y.TextureUvIndex - 1]))) {
@@ -396,7 +439,7 @@ namespace ConvertOBJToBedrockModel
 
             public int GetHashCode([DisallowNull] Element obj)
             {
-                return HashCode.Combine(_vertices[obj.VertexIndex - 1], _uvs[obj.TextureUvIndex - 1], _normals[obj.NormalIndex - 1]);
+                return HashCode.Combine(_vertices[obj.PositionIndex - 1], _uvs[obj.TextureUvIndex - 1], _normals[(obj.NormalIndex ?? -1) - 1]);
             }
         }
     }
@@ -486,54 +529,88 @@ namespace ConvertOBJToBedrockModel
 
 	internal class Polygon
 	{
-		public List<Element> Elements = new List<Element>();
+		public List<Element> Vertices = new List<Element>();
 		public void AddElement(Element element)
 		{
-			Elements.Add(element);
+			Vertices.Add(element);
 		}
 
         public override bool Equals(object obj)
         {
             return obj is Polygon polygon &&
-                   EqualityComparer<List<Element>>.Default.Equals(Elements, polygon.Elements);
+                   EqualityComparer<List<Element>>.Default.Equals(Vertices, polygon.Vertices);
         }
 
         public override int GetHashCode()
         {
-            return HashCode.Combine(Elements);
+            return HashCode.Combine(Vertices);
         }
 
         internal void RepairToQuad(Element element)
         {
-			Elements.Insert(2, element);
-			Elements.Reverse();
+			Vertices.Insert(2, element);
+			Vertices.Reverse();
+        }
+
+        public VertexNormal GetNormal(IReadOnlyList<Vertex> vertices)
+        {
+            var vertexA = vertices[Vertices[0].PositionIndex - 1];
+            var vertexB = vertices[Vertices[1].PositionIndex - 1];
+            var vertexC = vertices[Vertices[2].PositionIndex - 1];
+
+            var u = new Vertex
+            {
+                X = vertexB.X - vertexA.X,
+                Y = vertexB.Y - vertexA.Y,
+                Z = vertexB.Z - vertexA.Z
+            };
+            var v = new Vertex
+            {
+                X = vertexC.X - vertexA.X,
+                Y = vertexC.Y - vertexA.Y,
+                Z = vertexC.Z - vertexA.Z
+            };
+
+			return new VertexNormal
+            {
+				X = (u.Y * v.Z) - (u.Z * v.Y),
+				Y = (u.Z * v.X) - (u.X * v.Z),
+				Z = (u.X * v.Y) - (u.Y * v.X)
+            };
+
         }
     }
 
 	internal class Element
 	{
-		public readonly int VertexIndex;
+		public readonly int PositionIndex;
 		public readonly int TextureUvIndex;
-		public readonly int NormalIndex;
+		public readonly int? NormalIndex;
 
-		public Element(int vertexIndex, int normalIndex, int textureUvIndex)
+		public Element(int positionIndex, int textureUvIndex, int normalIndex)
 		{
-			VertexIndex = vertexIndex;
+			PositionIndex = positionIndex;
 			TextureUvIndex = textureUvIndex;
 			NormalIndex = normalIndex;
 		}
 
-        public override bool Equals(object obj)
+        public Element(int positionIndex, int textureUvIndex)
+        {
+            PositionIndex = positionIndex;
+            TextureUvIndex = textureUvIndex;
+        }
+
+		public override bool Equals(object obj)
         {
             return obj is Element element &&
-                   VertexIndex == element.VertexIndex &&
+                   PositionIndex == element.PositionIndex &&
                    TextureUvIndex == element.TextureUvIndex &&
                    NormalIndex == element.NormalIndex;
         }
 
         public override int GetHashCode()
         {
-            return HashCode.Combine(VertexIndex, TextureUvIndex, NormalIndex);
+            return HashCode.Combine(PositionIndex, TextureUvIndex, NormalIndex);
         }
     }
 }
